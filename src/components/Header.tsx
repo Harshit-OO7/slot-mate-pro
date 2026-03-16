@@ -1,16 +1,19 @@
 import { useParking } from '@/context/ParkingContext';
 import { Link, useLocation } from 'react-router-dom';
-import { Code, LayoutGrid, LogIn, BarChart3 } from 'lucide-react';
+import { Code, LayoutGrid, LogIn, BarChart3, MapPin } from 'lucide-react';
 
 export default function Header() {
-  const { availableSlots, totalSlots, showSqlOverlay, toggleSqlOverlay } = useParking();
+  const { selectedLocation, globalAvailable, globalTotal, availableSlots, totalSlots, showSqlOverlay, toggleSqlOverlay } = useParking();
   const location = useLocation();
 
   const navItems = [
-    { path: '/', label: 'Entry', icon: LogIn },
+    { path: '/', label: 'Locations', icon: MapPin },
     { path: '/dashboard', label: 'Dashboard', icon: BarChart3 },
     { path: '/admin', label: 'Admin Grid', icon: LayoutGrid },
   ];
+
+  const dispAvailable = selectedLocation ? availableSlots : globalAvailable;
+  const dispTotal = selectedLocation ? totalSlots : globalTotal;
 
   return (
     <header className="border-b border-border/50 bg-card/50 backdrop-blur-md sticky top-0 z-50">
@@ -22,6 +25,13 @@ export default function Header() {
             </div>
             <span className="font-semibold text-foreground tracking-tight">ParkSQL</span>
           </Link>
+
+          {selectedLocation && (
+            <div className="hidden md:flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/5 border border-primary/20 text-xs font-mono text-primary">
+              <MapPin className="w-3 h-3" />
+              {selectedLocation.name}
+            </div>
+          )}
 
           <nav className="hidden md:flex items-center gap-1">
             {navItems.map(item => (
@@ -45,8 +55,8 @@ export default function Header() {
           <div className="hidden sm:flex items-center gap-2 text-sm font-mono tabular-nums">
             <span className="w-2 h-2 rounded-full bg-success animate-pulse-dot" />
             <span className="text-muted-foreground">
-              <span className="text-success font-semibold">{availableSlots}</span>
-              /{totalSlots} Available
+              <span className="text-success font-semibold">{dispAvailable}</span>
+              /{dispTotal} Available
             </span>
           </div>
 

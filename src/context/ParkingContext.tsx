@@ -2,8 +2,19 @@ import React, { createContext, useContext, useState, useCallback, useEffect } fr
 
 export type SlotStatus = 'available' | 'occupied' | 'reserved';
 
+export interface ParkingLocation {
+  id: string;
+  name: string;
+  type: 'tech-park' | 'airport' | 'railway';
+  address: string;
+  ratePerHour: number;
+  zones: string[];
+  slotsPerZone: number;
+}
+
 export interface ParkingSlot {
   id: string;
+  locationId: string;
   zone: string;
   status: SlotStatus;
   currentPlate: string | null;
@@ -12,6 +23,7 @@ export interface ParkingSlot {
 
 export interface Transaction {
   id: string;
+  locationId: string;
   plateNumber: string;
   slotId: string;
   amount: number;
@@ -29,66 +41,116 @@ export interface SQLLogEntry {
 export interface UserSession {
   plateNumber: string;
   slotId: string;
+  locationId: string;
   entryTime: Date;
 }
 
+export const LOCATIONS: ParkingLocation[] = [
+  {
+    id: 'tech-park',
+    name: 'Tech Park',
+    type: 'tech-park',
+    address: 'OMR, Sholinganallur, Chennai 600119',
+    ratePerHour: 40,
+    zones: ['A', 'B', 'C', 'D'],
+    slotsPerZone: 10,
+  },
+  {
+    id: 'chennai-airport',
+    name: 'Chennai Airport',
+    type: 'airport',
+    address: 'GST Road, Tirusulam, Chennai 600027',
+    ratePerHour: 80,
+    zones: ['T1', 'T2', 'T3', 'VIP'],
+    slotsPerZone: 15,
+  },
+  {
+    id: 'mgr-railway',
+    name: 'MGR Railway Station',
+    type: 'railway',
+    address: 'Park Town, Chennai 600003',
+    ratePerHour: 30,
+    zones: ['P1', 'P2', 'P3'],
+    slotsPerZone: 12,
+  },
+];
+
 interface ParkingContextType {
+  locations: ParkingLocation[];
+  selectedLocation: ParkingLocation | null;
+  selectLocation: (id: string) => void;
   slots: ParkingSlot[];
+  locationSlots: ParkingSlot[];
   transactions: Transaction[];
   sqlLog: SQLLogEntry[];
   activeSession: UserSession | null;
-  ratePerHour: number;
-  totalSlots: number;
-  availableSlots: number;
-  occupiedSlots: number;
   showSqlOverlay: boolean;
   toggleSqlOverlay: () => void;
   enterParking: (plateNumber: string) => ParkingSlot | null;
   exitParking: (plateNumber: string) => Transaction | null;
   getSlotByPlate: (plateNumber: string) => ParkingSlot | null;
-  calculateBill: (entryTime: Date) => { duration: number; amount: number };
+  calculateBill: (entryTime: Date, ratePerHour: number) => { duration: number; amount: number };
+  // Computed for selected location
+  totalSlots: number;
+  availableSlots: number;
+  occupiedSlots: number;
+  ratePerHour: number;
+  // Global stats
+  globalAvailable: number;
+  globalTotal: number;
 }
 
 const ParkingContext = createContext<ParkingContextType | null>(null);
 
-const ZONES = ['A', 'B', 'C', 'D'];
-const SLOTS_PER_ZONE = 12;
-const RATE_PER_HOUR = 50;
-
-function generateSlots(): ParkingSlot[] {
+function generateAllSlots(): ParkingSlot[] {
   const slots: ParkingSlot[] = [];
-  ZONES.forEach(zone => {
-    for (let i = 1; i <= SLOTS_PER_ZONE; i++) {
-      const id = `${zone}-${String(i).padStart(2, '0')}`;
-      slots.push({
-        id,
-        zone,
-        status: 'available',
-        currentPlate: null,
-        entryTime: null,
-      });
-    }
+  LOCATIONS.forEach(loc => {
+    loc.zones.forEach(zone => {
+      for (let i = 1; i <= loc.slotsPerZone; i++) {
+        slots.push({
+          id: `${zone}-${String(i).padStart(2, '0')}`,
+          locationId: loc.id,
+          zone,
+          status: 'available',
+          currentPlate: null,
+          entryTime: null,
+        });
+      }
+    });
   });
-  // Pre-occupy some slots for demo
-  const demoPlates = ['MH-12-AB-1234', 'DL-01-CD-5678', 'KA-03-EF-9012', 'TN-07-GH-3456',
-    'UP-32-IJ-7890', 'GJ-05-KL-2345', 'RJ-14-MN-6789', 'MP-09-OP-0123'];
-  demoPlates.forEach((plate, i) => {
-    const slot = slots[i * 5 + Math.floor(Math.random() * 4)];
-    if (slot) {
-      slot.status = 'occupied';
-      slot.currentPlate = plate;
-      slot.entryTime = new Date(Date.now() - Math.random() * 4 * 60 * 60 * 1000);
-    }
+
+  // Demo occupied slots
+  const demoData: { loc: string; plates: string[] }[] = [
+    { loc: 'tech-park', plates: ['TN-22-AB-1234', 'KA-01-CD-5678', 'TN-09-EF-9012'] },
+    { loc: 'chennai-airport', plates: ['DL-01-GH-3456', 'MH-12-IJ-7890', 'TN-07-KL-2345', 'UP-32-MN-6789', 'GJ-05-OP-0123'] },
+    { loc: 'mgr-railway', plates: ['TN-01-QR-4567', 'AP-09-ST-8901'] },
+  ];
+
+  demoData.forEach(({ loc, plates }) => {
+    const locSlots = slots.filter(s => s.locationId === loc && s.status === 'available');
+    plates.forEach((plate, i) => {
+      const slot = locSlots[i * 3 + Math.floor(Math.random() * 2)];
+      if (slot) {
+        slot.status = 'occupied';
+        slot.currentPlate = plate;
+        slot.entryTime = new Date(Date.now() - Math.random() * 4 * 60 * 60 * 1000);
+      }
+    });
   });
+
   return slots;
 }
 
 export function ParkingProvider({ children }: { children: React.ReactNode }) {
-  const [slots, setSlots] = useState<ParkingSlot[]>(generateSlots);
+  const [slots, setSlots] = useState<ParkingSlot[]>(generateAllSlots);
+  const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [sqlLog, setSqlLog] = useState<SQLLogEntry[]>([]);
   const [activeSession, setActiveSession] = useState<UserSession | null>(null);
   const [showSqlOverlay, setShowSqlOverlay] = useState(false);
+
+  const selectedLocation = LOCATIONS.find(l => l.id === selectedLocationId) || null;
+  const locationSlots = selectedLocationId ? slots.filter(s => s.locationId === selectedLocationId) : [];
 
   const addSqlLog = useCallback((query: string) => {
     const entry: SQLLogEntry = {
@@ -103,64 +165,78 @@ export function ParkingProvider({ children }: { children: React.ReactNode }) {
     }, 2000);
   }, []);
 
-  // Initial SQL log entries
   useEffect(() => {
-    addSqlLog("SELECT * FROM parking_slots ORDER BY zone, id;");
-    addSqlLog("SELECT COUNT(*) as available FROM parking_slots WHERE status = 'available';");
+    addSqlLog("SELECT * FROM locations ORDER BY name;");
+    addSqlLog("SELECT COUNT(*) as total, SUM(CASE WHEN status='available' THEN 1 ELSE 0 END) as free FROM parking_slots GROUP BY location_id;");
   }, []);
 
-  const availableSlots = slots.filter(s => s.status === 'available').length;
-  const occupiedSlots = slots.filter(s => s.status === 'occupied').length;
+  const selectLocation = useCallback((id: string) => {
+    setSelectedLocationId(id);
+    const loc = LOCATIONS.find(l => l.id === id);
+    if (loc) {
+      addSqlLog(`SELECT * FROM parking_slots WHERE location_id = '${id}' ORDER BY zone, id;`);
+      addSqlLog(`SELECT COUNT(*) as available FROM parking_slots WHERE location_id = '${id}' AND status = 'available';`);
+    }
+  }, [addSqlLog]);
+
+  const totalSlots = locationSlots.length;
+  const availableSlots = locationSlots.filter(s => s.status === 'available').length;
+  const occupiedSlots = locationSlots.filter(s => s.status === 'occupied').length;
+  const globalAvailable = slots.filter(s => s.status === 'available').length;
+  const globalTotal = slots.length;
 
   const enterParking = useCallback((plateNumber: string): ParkingSlot | null => {
+    if (!selectedLocation) return null;
     const plate = plateNumber.toUpperCase().trim();
-    
-    addSqlLog(`SELECT * FROM parking_slots WHERE status = 'available' ORDER BY zone, id LIMIT 1;`);
-    
-    const availableSlot = slots.find(s => s.status === 'available');
+
+    addSqlLog(`SELECT * FROM parking_slots WHERE location_id = '${selectedLocation.id}' AND status = 'available' ORDER BY zone, id LIMIT 1;`);
+
+    const availableSlot = slots.find(s => s.locationId === selectedLocation.id && s.status === 'available');
     if (!availableSlot) return null;
 
     const entryTime = new Date();
-    
-    setSlots(prev => prev.map(s => 
-      s.id === availableSlot.id 
+
+    setSlots(prev => prev.map(s =>
+      s.id === availableSlot.id && s.locationId === selectedLocation.id
         ? { ...s, status: 'occupied' as SlotStatus, currentPlate: plate, entryTime }
         : s
     ));
 
-    addSqlLog(`UPDATE parking_slots SET status = 'occupied', current_plate = '${plate}', entry_time = NOW() WHERE id = '${availableSlot.id}';`);
-    addSqlLog(`INSERT INTO active_sessions (plate_number, slot_id, entry_time) VALUES ('${plate}', '${availableSlot.id}', NOW());`);
+    addSqlLog(`UPDATE parking_slots SET status = 'occupied', current_plate = '${plate}', entry_time = NOW() WHERE id = '${availableSlot.id}' AND location_id = '${selectedLocation.id}';`);
+    addSqlLog(`INSERT INTO active_sessions (plate_number, slot_id, location_id, entry_time) VALUES ('${plate}', '${availableSlot.id}', '${selectedLocation.id}', NOW());`);
 
-    const session: UserSession = { plateNumber: plate, slotId: availableSlot.id, entryTime };
+    const session: UserSession = { plateNumber: plate, slotId: availableSlot.id, locationId: selectedLocation.id, entryTime };
     setActiveSession(session);
 
     return { ...availableSlot, status: 'occupied', currentPlate: plate, entryTime };
-  }, [slots, addSqlLog]);
+  }, [slots, selectedLocation, addSqlLog]);
 
-  const calculateBill = useCallback((entryTime: Date) => {
-    const now = new Date();
-    const diffMs = now.getTime() - entryTime.getTime();
+  const calculateBill = useCallback((entryTime: Date, rate: number) => {
+    const diffMs = Date.now() - entryTime.getTime();
     const durationMinutes = Math.max(1, Math.ceil(diffMs / 60000));
     const hours = durationMinutes / 60;
-    const amount = Math.ceil(hours * RATE_PER_HOUR * 100) / 100;
+    const amount = Math.ceil(hours * rate * 100) / 100;
     return { duration: durationMinutes, amount };
   }, []);
 
   const exitParking = useCallback((plateNumber: string): Transaction | null => {
     const plate = plateNumber.toUpperCase().trim();
-    
-    addSqlLog(`SELECT * FROM parking_slots WHERE current_plate = '${plate}';`);
-    
+
+    addSqlLog(`SELECT ps.*, l.rate_per_hour FROM parking_slots ps JOIN locations l ON ps.location_id = l.id WHERE ps.current_plate = '${plate}';`);
+
     const slot = slots.find(s => s.currentPlate === plate);
     if (!slot || !slot.entryTime) return null;
 
-    const { duration, amount } = calculateBill(slot.entryTime);
+    const loc = LOCATIONS.find(l => l.id === slot.locationId);
+    const rate = loc?.ratePerHour || 50;
+    const { duration, amount } = calculateBill(slot.entryTime, rate);
 
     addSqlLog(`SELECT TIMESTAMPDIFF(MINUTE, entry_time, NOW()) as duration FROM parking_slots WHERE current_plate = '${plate}';`);
-    addSqlLog(`-- Calculated: ${duration} mins × ₹${RATE_PER_HOUR}/hr = ₹${amount.toFixed(2)}`);
+    addSqlLog(`-- Calculated: ${duration} mins × ₹${rate}/hr = ₹${amount.toFixed(2)}`);
 
     const transaction: Transaction = {
       id: crypto.randomUUID(),
+      locationId: slot.locationId,
       plateNumber: plate,
       slotId: slot.id,
       amount,
@@ -168,17 +244,17 @@ export function ParkingProvider({ children }: { children: React.ReactNode }) {
       exitTime: new Date(),
     };
 
-    setSlots(prev => prev.map(s => 
-      s.id === slot.id 
+    setSlots(prev => prev.map(s =>
+      s.id === slot.id && s.locationId === slot.locationId
         ? { ...s, status: 'available' as SlotStatus, currentPlate: null, entryTime: null }
         : s
     ));
 
     setTransactions(prev => [transaction, ...prev]);
-    
-    addSqlLog(`UPDATE parking_slots SET status = 'available', current_plate = NULL, entry_time = NULL WHERE id = '${slot.id}';`);
+
+    addSqlLog(`UPDATE parking_slots SET status = 'available', current_plate = NULL, entry_time = NULL WHERE id = '${slot.id}' AND location_id = '${slot.locationId}';`);
     addSqlLog(`DELETE FROM active_sessions WHERE plate_number = '${plate}';`);
-    addSqlLog(`INSERT INTO transactions (plate_number, slot_id, amount, duration_minutes, exit_time) VALUES ('${plate}', '${slot.id}', ${amount.toFixed(2)}, ${duration}, NOW());`);
+    addSqlLog(`INSERT INTO transactions (plate_number, slot_id, location_id, amount, duration_minutes) VALUES ('${plate}', '${slot.id}', '${slot.locationId}', ${amount.toFixed(2)}, ${duration});`);
 
     if (activeSession?.plateNumber === plate) {
       setActiveSession(null);
@@ -193,10 +269,13 @@ export function ParkingProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <ParkingContext.Provider value={{
-      slots, transactions, sqlLog, activeSession,
-      ratePerHour: RATE_PER_HOUR,
-      totalSlots: slots.length,
-      availableSlots, occupiedSlots,
+      locations: LOCATIONS,
+      selectedLocation,
+      selectLocation,
+      slots, locationSlots, transactions, sqlLog, activeSession,
+      ratePerHour: selectedLocation?.ratePerHour || 0,
+      totalSlots, availableSlots, occupiedSlots,
+      globalAvailable, globalTotal,
       showSqlOverlay, toggleSqlOverlay: () => setShowSqlOverlay(p => !p),
       enterParking, exitParking, getSlotByPlate, calculateBill,
     }}>
