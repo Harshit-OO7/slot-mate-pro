@@ -5,12 +5,12 @@ import { useState } from 'react';
 import { X } from 'lucide-react';
 
 export default function SlotGrid() {
-  const { slots } = useParking();
+  const { locationSlots } = useParking();
   const [selectedSlot, setSelectedSlot] = useState<ParkingSlot | null>(null);
   const [filterZone, setFilterZone] = useState<string | null>(null);
 
-  const zones = [...new Set(slots.map(s => s.zone))];
-  const filtered = filterZone ? slots.filter(s => s.zone === filterZone) : slots;
+  const zones = [...new Set(locationSlots.map(s => s.zone))];
+  const filtered = filterZone ? locationSlots.filter(s => s.zone === filterZone) : locationSlots;
 
   return (
     <div>
