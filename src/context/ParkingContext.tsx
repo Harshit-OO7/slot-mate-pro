@@ -273,7 +273,7 @@ export function ParkingProvider({ children }: { children: React.ReactNode }) {
       locations: LOCATIONS,
       selectedLocation,
       selectLocation,
-      slots, locationSlots, transactions, sqlLog, activeSession,
+      slots, locationSlots, transactions, sqlLog, addSqlLog, activeSession,
       ratePerHour: selectedLocation?.ratePerHour || 0,
       totalSlots, availableSlots, occupiedSlots,
       globalAvailable, globalTotal,
