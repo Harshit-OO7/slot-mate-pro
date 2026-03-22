@@ -138,9 +138,9 @@ export default function Index() {
                     Choose Location
                     <ArrowRight className="w-4 h-4 ml-2" />
                   </Button>
-                  <Button variant="outline" size="lg" className="h-12 px-8 text-sm font-medium" onClick={() => navigate('/admin')}>
-                    Admin Panel
-                  </Button>
+                    <Button variant="outline" size="lg" className="h-12 px-8 text-sm font-medium" onClick={() => navigate('/admin-login')}>
+                      Login as Admin →
+                    </Button>
                 </motion.div>
               )}
             </motion.div>

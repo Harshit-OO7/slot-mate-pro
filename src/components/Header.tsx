@@ -9,7 +9,7 @@ export default function Header() {
   const navItems = [
     { path: '/', label: 'Locations', icon: MapPin },
     { path: '/dashboard', label: 'Dashboard', icon: BarChart3 },
-    { path: '/admin', label: 'Admin Grid', icon: LayoutGrid },
+    { path: '/admin-login', label: 'Admin', icon: LayoutGrid },
   ];
 
   const dispAvailable = selectedLocation ? availableSlots : globalAvailable;
