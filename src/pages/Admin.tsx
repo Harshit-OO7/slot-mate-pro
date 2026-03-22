@@ -9,6 +9,9 @@ import {
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import {
+  SAMPLE_CUSTOMERS, SAMPLE_PAYMENTS, SAMPLE_VEHICLE_LOGS, SAMPLE_AUDIT_LOGS
+} from '@/data/sampleData';
 
 type AdminTab = 'overview' | 'slots' | 'console' | 'transactions';
 
@@ -19,6 +22,16 @@ const PRESET_QUERIES = [
   { label: 'Slot Count by Location', query: "SELECT location_id, COUNT(*) as total, SUM(CASE WHEN status='available' THEN 1 ELSE 0 END) as free FROM parking_slots GROUP BY location_id;" },
   { label: 'Recent Transactions', query: "SELECT * FROM transactions ORDER BY exit_time DESC LIMIT 20;" },
   { label: 'Revenue by Location', query: "SELECT location_id, SUM(amount) as revenue, COUNT(*) as trips FROM transactions GROUP BY location_id;" },
+  { label: 'All Customers', query: "SELECT * FROM customers ORDER BY name;" },
+  { label: 'JOIN: Customer + Payments', query: "SELECT c.name, c.plate_number, p.amount, p.method, p.status FROM customers c INNER JOIN payments p ON c.id = p.customer_id;" },
+  { label: 'JOIN: Vehicles + Locations', query: "SELECT vl.plate_number, l.name as location, vl.slot_id, vl.entry_time, vl.exit_time, vl.amount FROM vehicle_logs vl JOIN locations l ON vl.location_id = l.id;" },
+  { label: 'AVG Amount by Location', query: "SELECT location_id, AVG(amount) as avg_amount, COUNT(*) as total_visits FROM vehicle_logs GROUP BY location_id;" },
+  { label: 'Revenue by Payment Method', query: "SELECT method, SUM(amount) as total, COUNT(*) as count FROM payments GROUP BY method;" },
+  { label: 'Customer Visit History', query: "SELECT c.name, c.membership, COUNT(vl.id) as visits, SUM(vl.amount) as total_spent FROM customers c LEFT JOIN vehicle_logs vl ON c.plate_number = vl.plate_number GROUP BY c.id, c.name, c.membership;" },
+  { label: 'CURSOR: Iterate Slots', query: "DECLARE slot_cursor CURSOR FOR SELECT id, zone, status FROM parking_slots WHERE location_id = 'tech-park'; OPEN slot_cursor; FETCH ALL FROM slot_cursor; CLOSE slot_cursor;" },
+  { label: 'TRIGGER: Audit Log', query: "-- Show trigger audit log\nSELECT * FROM audit_log ORDER BY triggered_at DESC;" },
+  { label: 'VIP Customers', query: "SELECT name, plate_number, phone, email FROM customers WHERE membership = 'vip';" },
+  { label: 'MAX Duration per Location', query: "SELECT location_id, MAX(duration_minutes) as max_duration, MIN(duration_minutes) as min_duration FROM vehicle_logs GROUP BY location_id;" },
 ];
 
 export default function Admin() {
@@ -49,12 +62,162 @@ export default function Admin() {
   const totalSlotsAll = slots.length;
   const totalAvailableAll = slots.filter(s => s.status === 'available').length;
 
-  // Simulate SQL query execution
+  // Simulate SQL query execution with sample data support
   const executeQuery = (query: string) => {
     const q = query.trim().toUpperCase();
     addSqlLog(query);
 
-    if (q.includes('FROM LOCATIONS')) {
+    // --- CURSOR simulation ---
+    if (q.includes('CURSOR') || q.includes('FETCH ALL')) {
+      const locMatch = query.match(/location_id\s*=\s*'([^']+)'/i);
+      const locId = locMatch ? locMatch[1] : 'tech-park';
+      const cursorSlots = slots.filter(s => s.locationId === locId).slice(0, 15);
+      addSqlLog(`-- CURSOR opened: slot_cursor`);
+      addSqlLog(`-- FETCH ALL: ${cursorSlots.length} rows fetched`);
+      addSqlLog(`-- CURSOR closed: slot_cursor`);
+      setQueryResults({
+        columns: ['cursor_row', 'id', 'zone', 'status', 'current_plate'],
+        rows: cursorSlots.map((s, i) => [String(i + 1), s.id, s.zone, s.status, s.currentPlate || 'NULL']),
+      });
+      return;
+    }
+
+    // --- TRIGGER / Audit log ---
+    if (q.includes('AUDIT_LOG') || q.includes('TRIGGER')) {
+      addSqlLog(`-- Showing audit_log entries from trigger: trg_parking_audit`);
+      setQueryResults({
+        columns: ['id', 'table_name', 'operation', 'old_value', 'new_value', 'triggered_at'],
+        rows: SAMPLE_AUDIT_LOGS.map(a => [a.id, a.table_name, a.operation, a.old_value, a.new_value, a.triggered_at]),
+      });
+      return;
+    }
+
+    // --- JOIN: customers + payments ---
+    if (q.includes('JOIN') && q.includes('CUSTOMERS') && q.includes('PAYMENTS')) {
+      addSqlLog(`-- Executing INNER JOIN: customers ⨝ payments ON customers.id = payments.customer_id`);
+      const joined = SAMPLE_PAYMENTS.map(p => {
+        const c = SAMPLE_CUSTOMERS.find(c => c.id === p.customer_id);
+        return c ? [c.name, c.plate_number, `₹${p.amount.toFixed(2)}`, p.method, p.status, p.paid_at] : null;
+      }).filter(Boolean) as string[][];
+      setQueryResults({
+        columns: ['name', 'plate_number', 'amount', 'method', 'payment_status', 'paid_at'],
+        rows: joined,
+      });
+      return;
+    }
+
+    // --- JOIN: vehicle_logs + locations ---
+    if (q.includes('JOIN') && q.includes('VEHICLE_LOGS') && q.includes('LOCATIONS')) {
+      addSqlLog(`-- Executing JOIN: vehicle_logs ⨝ locations ON vehicle_logs.location_id = locations.id`);
+      const joined = SAMPLE_VEHICLE_LOGS.map(vl => {
+        const loc = LOCATIONS.find(l => l.id === vl.location_id);
+        return [vl.plate_number, loc?.name || vl.location_id, vl.slot_id, vl.entry_time, vl.exit_time || 'Still parked', `₹${(vl.amount || 0).toFixed(2)}`];
+      });
+      setQueryResults({
+        columns: ['plate_number', 'location', 'slot_id', 'entry_time', 'exit_time', 'amount'],
+        rows: joined,
+      });
+      return;
+    }
+
+    // --- LEFT JOIN: customers + vehicle_logs (visit history) ---
+    if (q.includes('LEFT JOIN') && q.includes('CUSTOMERS') && q.includes('VEHICLE_LOGS')) {
+      addSqlLog(`-- Executing LEFT JOIN: customers ⟕ vehicle_logs ON plate_number`);
+      const result = SAMPLE_CUSTOMERS.map(c => {
+        const visits = SAMPLE_VEHICLE_LOGS.filter(vl => vl.plate_number === c.plate_number);
+        const totalSpent = visits.reduce((sum, vl) => sum + (vl.amount || 0), 0);
+        return [c.name, c.membership, String(visits.length), `₹${totalSpent.toFixed(2)}`];
+      });
+      setQueryResults({
+        columns: ['name', 'membership', 'visits', 'total_spent'],
+        rows: result,
+      });
+      return;
+    }
+
+    // --- GROUP BY on vehicle_logs (AVG, COUNT) ---
+    if (q.includes('VEHICLE_LOGS') && q.includes('GROUP BY') && (q.includes('AVG') || q.includes('COUNT'))) {
+      const grouped: Record<string, { total: number; count: number }> = {};
+      SAMPLE_VEHICLE_LOGS.forEach(vl => {
+        if (!grouped[vl.location_id]) grouped[vl.location_id] = { total: 0, count: 0 };
+        grouped[vl.location_id].total += vl.amount || 0;
+        grouped[vl.location_id].count += 1;
+      });
+      setQueryResults({
+        columns: ['location_id', 'avg_amount', 'total_visits'],
+        rows: Object.entries(grouped).map(([loc, d]) => [loc, `₹${(d.total / d.count).toFixed(2)}`, String(d.count)]),
+      });
+      return;
+    }
+
+    // --- MAX/MIN duration ---
+    if (q.includes('VEHICLE_LOGS') && (q.includes('MAX') || q.includes('MIN'))) {
+      const grouped: Record<string, { max: number; min: number }> = {};
+      SAMPLE_VEHICLE_LOGS.forEach(vl => {
+        const dur = vl.duration_minutes || 0;
+        if (!grouped[vl.location_id]) grouped[vl.location_id] = { max: dur, min: dur };
+        grouped[vl.location_id].max = Math.max(grouped[vl.location_id].max, dur);
+        grouped[vl.location_id].min = Math.min(grouped[vl.location_id].min, dur);
+      });
+      setQueryResults({
+        columns: ['location_id', 'max_duration_min', 'min_duration_min'],
+        rows: Object.entries(grouped).map(([loc, d]) => [loc, String(d.max), String(d.min)]),
+      });
+      return;
+    }
+
+    // --- GROUP BY on payments ---
+    if (q.includes('PAYMENTS') && q.includes('GROUP BY')) {
+      const grouped: Record<string, { total: number; count: number }> = {};
+      SAMPLE_PAYMENTS.forEach(p => {
+        if (!grouped[p.method]) grouped[p.method] = { total: 0, count: 0 };
+        grouped[p.method].total += p.amount;
+        grouped[p.method].count += 1;
+      });
+      setQueryResults({
+        columns: ['method', 'total_revenue', 'count'],
+        rows: Object.entries(grouped).map(([m, d]) => [m, `₹${d.total.toFixed(2)}`, String(d.count)]),
+      });
+      return;
+    }
+
+    // --- SELECT * FROM customers ---
+    if (q.includes('FROM CUSTOMERS') && !q.includes('JOIN')) {
+      if (q.includes("MEMBERSHIP = 'VIP'") || q.includes("MEMBERSHIP='VIP'")) {
+        const vips = SAMPLE_CUSTOMERS.filter(c => c.membership === 'vip');
+        setQueryResults({
+          columns: ['name', 'plate_number', 'phone', 'email', 'membership'],
+          rows: vips.map(c => [c.name, c.plate_number, c.phone, c.email, c.membership]),
+        });
+      } else {
+        setQueryResults({
+          columns: ['id', 'name', 'phone', 'email', 'plate_number', 'membership', 'registered_on'],
+          rows: SAMPLE_CUSTOMERS.map(c => [c.id, c.name, c.phone, c.email, c.plate_number, c.membership, c.registered_on]),
+        });
+      }
+      return;
+    }
+
+    // --- SELECT * FROM payments ---
+    if (q.includes('FROM PAYMENTS') && !q.includes('JOIN') && !q.includes('GROUP BY')) {
+      setQueryResults({
+        columns: ['id', 'transaction_id', 'customer_id', 'amount', 'method', 'status', 'paid_at'],
+        rows: SAMPLE_PAYMENTS.map(p => [p.id, p.transaction_id, p.customer_id, `₹${p.amount.toFixed(2)}`, p.method, p.status, p.paid_at]),
+      });
+      return;
+    }
+
+    // --- SELECT * FROM vehicle_logs ---
+    if (q.includes('FROM VEHICLE_LOGS') && !q.includes('JOIN') && !q.includes('GROUP BY') && !q.includes('MAX') && !q.includes('MIN')) {
+      setQueryResults({
+        columns: ['id', 'plate_number', 'location_id', 'slot_id', 'entry_time', 'exit_time', 'duration_min', 'amount'],
+        rows: SAMPLE_VEHICLE_LOGS.map(vl => [vl.id, vl.plate_number, vl.location_id, vl.slot_id, vl.entry_time, vl.exit_time || 'NULL', String(vl.duration_minutes || 'NULL'), `₹${(vl.amount || 0).toFixed(2)}`]),
+      });
+      return;
+    }
+
+    // --- Original queries below ---
+    if (q.includes('FROM LOCATIONS') && !q.includes('JOIN')) {
       setQueryResults({
         columns: ['id', 'name', 'type', 'address', 'rate_per_hour', 'zones'],
         rows: LOCATIONS.map(l => [l.id, l.name, l.type, l.address, `₹${l.ratePerHour}`, l.zones.join(', ')]),
@@ -71,7 +234,7 @@ export default function Admin() {
         columns: ['id', 'zone', 'location_id', 'current_plate', 'entry_time'],
         rows: occ.map(s => [s.id, s.zone, s.locationId, s.currentPlate || '', s.entryTime?.toLocaleString() || '']),
       });
-    } else if (q.includes('GROUP BY LOCATION_ID') && q.includes('COUNT')) {
+    } else if (q.includes('GROUP BY LOCATION_ID') && q.includes('COUNT') && q.includes('PARKING_SLOTS')) {
       setQueryResults({
         columns: ['location_id', 'total', 'available', 'occupied'],
         rows: LOCATIONS.map(l => {
@@ -80,15 +243,16 @@ export default function Admin() {
           return [l.id, String(ls.length), String(av), String(ls.length - av)];
         }),
       });
-    } else if (q.includes('FROM TRANSACTIONS')) {
+    } else if (q.includes('FROM TRANSACTIONS') && !q.includes('GROUP BY')) {
+      const allTx = [...transactions];
       setQueryResults({
         columns: ['plate', 'location', 'slot', 'duration', 'amount', 'exit_time'],
-        rows: transactions.slice(0, 20).map(tx => [
+        rows: allTx.slice(0, 20).map(tx => [
           tx.plateNumber, tx.locationId, tx.slotId,
           `${tx.durationMinutes} min`, `₹${tx.amount.toFixed(2)}`, tx.exitTime.toLocaleString()
         ]),
       });
-    } else if (q.includes('SUM(AMOUNT)') || q.includes('REVENUE')) {
+    } else if (q.includes('SUM(AMOUNT)') || (q.includes('REVENUE') && q.includes('TRANSACTIONS'))) {
       const grouped: Record<string, { revenue: number; trips: number }> = {};
       transactions.forEach(tx => {
         if (!grouped[tx.locationId]) grouped[tx.locationId] = { revenue: 0, trips: 0 };
