@@ -50,7 +50,7 @@ export const LOCATIONS: ParkingLocation[] = [
     id: 'tech-park',
     name: 'Tech Park',
     type: 'tech-park',
-    address: 'OMR, Sholinganallur, Chennai 600119',
+    address: 'SRM Institute of Science and Technology, Kattankulathur 603203',
     ratePerHour: 40,
     zones: ['A', 'B', 'C', 'D'],
     slotsPerZone: 10,
