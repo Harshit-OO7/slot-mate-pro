@@ -9,6 +9,9 @@ import {
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import {
+  SAMPLE_CUSTOMERS, SAMPLE_PAYMENTS, SAMPLE_VEHICLE_LOGS, SAMPLE_AUDIT_LOGS
+} from '@/data/sampleData';
 
 type AdminTab = 'overview' | 'slots' | 'console' | 'transactions';
 
@@ -19,6 +22,16 @@ const PRESET_QUERIES = [
   { label: 'Slot Count by Location', query: "SELECT location_id, COUNT(*) as total, SUM(CASE WHEN status='available' THEN 1 ELSE 0 END) as free FROM parking_slots GROUP BY location_id;" },
   { label: 'Recent Transactions', query: "SELECT * FROM transactions ORDER BY exit_time DESC LIMIT 20;" },
   { label: 'Revenue by Location', query: "SELECT location_id, SUM(amount) as revenue, COUNT(*) as trips FROM transactions GROUP BY location_id;" },
+  { label: 'All Customers', query: "SELECT * FROM customers ORDER BY name;" },
+  { label: 'JOIN: Customer + Payments', query: "SELECT c.name, c.plate_number, p.amount, p.method, p.status FROM customers c INNER JOIN payments p ON c.id = p.customer_id;" },
+  { label: 'JOIN: Vehicles + Locations', query: "SELECT vl.plate_number, l.name as location, vl.slot_id, vl.entry_time, vl.exit_time, vl.amount FROM vehicle_logs vl JOIN locations l ON vl.location_id = l.id;" },
+  { label: 'AVG Amount by Location', query: "SELECT location_id, AVG(amount) as avg_amount, COUNT(*) as total_visits FROM vehicle_logs GROUP BY location_id;" },
+  { label: 'Revenue by Payment Method', query: "SELECT method, SUM(amount) as total, COUNT(*) as count FROM payments GROUP BY method;" },
+  { label: 'Customer Visit History', query: "SELECT c.name, c.membership, COUNT(vl.id) as visits, SUM(vl.amount) as total_spent FROM customers c LEFT JOIN vehicle_logs vl ON c.plate_number = vl.plate_number GROUP BY c.id, c.name, c.membership;" },
+  { label: 'CURSOR: Iterate Slots', query: "DECLARE slot_cursor CURSOR FOR SELECT id, zone, status FROM parking_slots WHERE location_id = 'tech-park'; OPEN slot_cursor; FETCH ALL FROM slot_cursor; CLOSE slot_cursor;" },
+  { label: 'TRIGGER: Audit Log', query: "-- Show trigger audit log\nSELECT * FROM audit_log ORDER BY triggered_at DESC;" },
+  { label: 'VIP Customers', query: "SELECT name, plate_number, phone, email FROM customers WHERE membership = 'vip';" },
+  { label: 'MAX Duration per Location', query: "SELECT location_id, MAX(duration_minutes) as max_duration, MIN(duration_minutes) as min_duration FROM vehicle_logs GROUP BY location_id;" },
 ];
 
 export default function Admin() {
