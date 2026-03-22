@@ -83,6 +83,7 @@ interface ParkingContextType {
   locationSlots: ParkingSlot[];
   transactions: Transaction[];
   sqlLog: SQLLogEntry[];
+  addSqlLog: (query: string) => void;
   activeSession: UserSession | null;
   showSqlOverlay: boolean;
   toggleSqlOverlay: () => void;
