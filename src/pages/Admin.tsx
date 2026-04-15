@@ -78,8 +78,9 @@ export default function Admin() {
 
   const [activeTab, setActiveTab] = useState<AdminTab>('overview');
   const [sqlInput, setSqlInput] = useState('');
-  const [queryResults, setQueryResults] = useState<{ columns: string[]; rows: string[][] } | null>(null);
+  const [queryResults, setQueryResults] = useState<{ columns: string[]; rows: string[][]; note?: string } | null>(null);
   const [searchPlate, setSearchPlate] = useState('');
+  const [activePresetCategory, setActivePresetCategory] = useState<PresetCategory>('Basic');
 
   useEffect(() => {
     const isAdmin = sessionStorage.getItem('parkSQL_admin');
