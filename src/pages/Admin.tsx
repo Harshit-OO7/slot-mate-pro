@@ -102,6 +102,350 @@ export default function Admin() {
     const q = query.trim().toUpperCase();
     addSqlLog(query);
 
+    // ===== NORMALIZATION =====
+    if (q.includes('PARKING_UNNORMALIZED')) {
+      addSqlLog('-- Showing UNNORMALIZED form: repeating groups, multi-valued attributes');
+      setQueryResults({
+        columns: ['txn_id', 'customer_name', 'phone', 'plate_numbers', 'location', 'address', 'zones', 'slot', 'amount', 'method'],
+        rows: [
+          ['TXN001', 'Rahul Sharma', '9876543210', 'TN-22-AB-1234, TN-22-XY-5678', 'SRM Tech Park', 'SRM IST, Kattankulathur', 'A, B, C', 'A-01', '₹120', 'upi'],
+          ['TXN002', 'Priya Nair', '9812345678', 'KA-01-CD-5678', 'Chennai Airport', 'GST Road, Chennai', 'T1, T2, T3, VIP', 'T1-02', '₹240', 'card'],
+          ['TXN003', 'Arjun Menon', '9898765432', 'TN-09-EF-9012, TN-09-AB-0001', 'MGR Railway', 'Central, Chennai', 'P1, P2, P3', 'P1-04', '₹90', 'cash'],
+          ['TXN004', 'Rahul Sharma', '9876543210', 'TN-22-AB-1234, TN-22-XY-5678', 'Chennai Airport', 'GST Road, Chennai', 'T1, T2, T3, VIP', 'T1-05', '₹200', 'upi'],
+        ],
+        note: '⚠️ PROBLEMS: Repeating groups (plate_numbers, zones), redundant data (customer info repeated), multi-valued attributes violate 1NF.'
+      });
+      return;
+    }
+
+    if (q.includes('LOCATIONS_1NF')) {
+      addSqlLog('-- 1NF: Atomic values only, no repeating groups');
+      setQueryResults({
+        columns: ['location_id', 'name', 'address', 'rate_per_hour', 'zone'],
+        rows: [
+          ['tech-park', 'SRM Tech Park', 'SRM IST, Kattankulathur', '₹40', 'A'],
+          ['tech-park', 'SRM Tech Park', 'SRM IST, Kattankulathur', '₹40', 'B'],
+          ['tech-park', 'SRM Tech Park', 'SRM IST, Kattankulathur', '₹40', 'C'],
+          ['chennai-airport', 'Chennai Airport', 'GST Road, Chennai', '₹80', 'T1'],
+          ['chennai-airport', 'Chennai Airport', 'GST Road, Chennai', '₹80', 'T2'],
+          ['chennai-airport', 'Chennai Airport', 'GST Road, Chennai', '₹80', 'T3'],
+          ['chennai-airport', 'Chennai Airport', 'GST Road, Chennai', '₹80', 'VIP'],
+          ['mgr-railway', 'MGR Railway Station', 'Central, Chennai', '₹30', 'P1'],
+          ['mgr-railway', 'MGR Railway Station', 'Central, Chennai', '₹30', 'P2'],
+          ['mgr-railway', 'MGR Railway Station', 'Central, Chennai', '₹30', 'P3'],
+        ],
+        note: '✅ 1NF achieved: Each cell has atomic (single) values. Zones split into individual rows. But redundancy remains (name, address repeated).'
+      });
+      return;
+    }
+
+    if (q.includes('TRANSACTIONS_2NF')) {
+      addSqlLog('-- 2NF: Remove partial dependencies on composite key (customer_id, transaction_id)');
+      setQueryResults({
+        columns: ['analysis', 'table', 'columns', 'dependency'],
+        rows: [
+          ['BEFORE (1NF)', 'transactions_flat', 'txn_id, customer_id, customer_name, phone, plate, location_id, loc_name, slot, amount', 'Composite PK: (txn_id, customer_id)'],
+          ['❌ Partial Dep', 'transactions_flat', 'customer_name, phone, plate', 'Depends ONLY on customer_id, NOT full PK'],
+          ['AFTER (2NF) — Table 1', 'customers', 'customer_id → name, phone, plate_number, membership', 'Full functional dependency'],
+          ['AFTER (2NF) — Table 2', 'transactions', 'txn_id → customer_id, location_id, slot_id, amount, time', 'Full functional dependency'],
+          ['AFTER (2NF) — Table 3', 'payments', 'payment_id → txn_id, amount, method, status', 'Full functional dependency'],
+        ],
+        note: '✅ 2NF: Split into customers, transactions, payments. No non-key attribute depends on part of a composite key.'
+      });
+      return;
+    }
+
+    if (q.includes('TRANSACTIONS_3NF')) {
+      addSqlLog('-- 3NF: Remove transitive dependencies (non-key → non-key)');
+      setQueryResults({
+        columns: ['analysis', 'table', 'dependency_chain', 'issue'],
+        rows: [
+          ['BEFORE', 'transactions_2nf', 'txn_id → location_id → location_name, address, rate', 'Transitive: txn_id → location_id → address'],
+          ['❌ Transitive Dep', '—', 'location_name depends on location_id, NOT on txn_id', 'UPDATE anomaly: changing address requires updating ALL txns'],
+          ['AFTER (3NF) — Table 1', 'locations', 'location_id → name, address, rate_per_hour', 'Direct dependency only'],
+          ['AFTER (3NF) — Table 2', 'transactions', 'txn_id → customer_id, location_id, slot_id, amount', 'No transitive deps'],
+          ['AFTER (3NF) — Table 3', 'parking_slots', 'slot_id → location_id, zone, status', 'No transitive deps'],
+          ['RESULT', 'All tables', 'Every non-key attribute depends on the key, the whole key, and nothing but the key', '✅ Codd\'s rule satisfied'],
+        ],
+        note: '✅ 3NF: No transitive dependencies. "Every non-key attribute must depend on the key, the whole key, and nothing but the key."'
+      });
+      return;
+    }
+
+    if (q.includes('CUSTOMER_4NF')) {
+      addSqlLog('-- 4NF: Eliminate multi-valued dependencies');
+      setQueryResults({
+        columns: ['analysis', 'table', 'columns', 'issue'],
+        rows: [
+          ['BEFORE', 'customer_vehicles_payments', 'customer_id, vehicle_plate, payment_method', 'MVD: customer →→ vehicle AND customer →→ payment_method'],
+          ['❌ Problem', '—', 'C001 owns 2 cars, uses 3 payment methods', 'Must store 2×3 = 6 rows (Cartesian product!)'],
+          ['Sample row', '—', 'C001, TN-22-AB-1234, upi', ''],
+          ['Sample row', '—', 'C001, TN-22-AB-1234, card', ''],
+          ['Sample row', '—', 'C001, TN-22-XY-5678, upi', 'Redundant combinations'],
+          ['Sample row', '—', 'C001, TN-22-XY-5678, card', 'Redundant combinations'],
+          ['AFTER (4NF) — Table 1', 'customer_vehicles', 'customer_id, plate_number', 'Independent MVD separated'],
+          ['AFTER (4NF) — Table 2', 'customer_payment_methods', 'customer_id, payment_method', 'Independent MVD separated'],
+        ],
+        note: '✅ 4NF: Multi-valued dependencies separated into independent tables. No more Cartesian product redundancy.'
+      });
+      return;
+    }
+
+    if (q.includes('BOOKING_5NF')) {
+      addSqlLog('-- 5NF (PJNF): Eliminate join dependencies');
+      setQueryResults({
+        columns: ['analysis', 'table', 'columns', 'explanation'],
+        rows: [
+          ['BEFORE', 'bookings', 'customer_id, location_id, slot_type', 'Ternary relationship'],
+          ['Rule 1', '—', 'Rahul can park at SRM Tech Park', 'Customer ↔ Location'],
+          ['Rule 2', '—', 'SRM Tech Park has Zone-A slots', 'Location ↔ Slot Type'],
+          ['Rule 3', '—', 'Rahul prefers Zone-A', 'Customer ↔ Slot Type'],
+          ['❌ Problem', '—', 'Cannot decompose into 2 tables without losing info', 'Join dependency exists'],
+          ['AFTER (5NF) — T1', 'customer_location', 'customer_id, location_id', 'Who parks where'],
+          ['AFTER (5NF) — T2', 'location_slot_types', 'location_id, slot_type', 'What slots exist where'],
+          ['AFTER (5NF) — T3', 'customer_preferences', 'customer_id, slot_type', 'What type customer prefers'],
+          ['VERIFY', 'T1 ⨝ T2 ⨝ T3', 'Natural join recovers original', '✅ No spurious tuples'],
+        ],
+        note: '✅ 5NF: All join dependencies are implied by candidate keys. Lossless decomposition into 3 projections.'
+      });
+      return;
+    }
+
+    if (q.includes('ANOMALIES_DEMO')) {
+      addSqlLog('-- Demonstrating INSERT, UPDATE, DELETE anomalies');
+      setQueryResults({
+        columns: ['anomaly_type', 'scenario', 'problem', 'solution'],
+        rows: [
+          ['INSERT', 'Add new location "Forum Mall"', 'Cannot insert location without a transaction/customer', 'Separate locations table (Normalization)'],
+          ['INSERT', 'Add customer C011 with no visits', 'Forced to insert NULL for slot, amount, location', 'Separate customers table'],
+          ['UPDATE', 'SRM Tech Park changes address', 'Must update ALL rows with that location', 'Single row in locations table (3NF)'],
+          ['UPDATE', 'Customer C001 changes phone number', 'Must find and update every transaction row', 'Separate customers table (2NF)'],
+          ['DELETE', 'Delete only transaction TXN003', 'Lose Arjun Menon\'s customer info if it\'s his only record', 'Separate customers table'],
+          ['DELETE', 'Remove all MGR Railway transactions', 'Lose the location info (name, address, rate)', 'Separate locations table (3NF)'],
+        ],
+        note: '⚠️ Anomalies occur in unnormalized/partially normalized data. Proper normalization (2NF, 3NF) eliminates these issues.'
+      });
+      return;
+    }
+
+    // ===== TRANSACTION MANAGEMENT (ACID) =====
+    if (q.includes('ATOMICITY') && (q.includes('BEGIN') || q.includes('COMMIT'))) {
+      addSqlLog('BEGIN TRANSACTION;');
+      addSqlLog('  → UPDATE parking_slots SET status=\'occupied\' WHERE id=\'A-01\'; ✓');
+      addSqlLog('  → INSERT INTO vehicle_logs ... ✓');
+      addSqlLog('  → INSERT INTO payments ... ✓');
+      addSqlLog('COMMIT; -- All 3 operations applied atomically');
+      setQueryResults({
+        columns: ['step', 'operation', 'status', 'explanation'],
+        rows: [
+          ['1', 'BEGIN TRANSACTION', '✅ Started', 'Transaction boundary opened'],
+          ['2', 'UPDATE parking_slots', '✅ Executed', 'Slot A-01 marked occupied (not yet visible to others)'],
+          ['3', 'INSERT vehicle_logs', '✅ Executed', 'Vehicle entry recorded in buffer'],
+          ['4', 'INSERT payments', '✅ Executed', 'Payment record created in buffer'],
+          ['5', 'COMMIT', '✅ Committed', 'ALL 3 changes now permanent and visible'],
+          ['—', 'If step 4 FAILED:', '❌ ROLLBACK', 'Steps 2 & 3 would ALSO be undone — ALL or NOTHING'],
+        ],
+        note: '⚛️ ATOMICITY: A transaction is an indivisible unit. Either ALL operations succeed (COMMIT) or NONE do (ROLLBACK).'
+      });
+      return;
+    }
+
+    if (q.includes('CONSISTENCY') && q.includes('BEGIN')) {
+      addSqlLog('-- Checking constraints before COMMIT...');
+      setQueryResults({
+        columns: ['constraint_type', 'rule', 'example', 'status'],
+        rows: [
+          ['CHECK', 'amount >= 0', 'Payment of ₹-50 rejected', '✅ Enforced'],
+          ['NOT NULL', 'plate_number IS NOT NULL', 'Empty plate rejected', '✅ Enforced'],
+          ['UNIQUE', 'UNIQUE(slot_id, location_id) when occupied', 'Two cars in same slot rejected', '✅ Enforced'],
+          ['FOREIGN KEY', 'customer_id REFERENCES customers(id)', 'Invalid customer C999 rejected', '✅ Enforced'],
+          ['DOMAIN', 'status IN (available, occupied, reserved)', 'status=\'broken\' rejected', '✅ Enforced'],
+          ['BUSINESS', 'occupied_count <= total_capacity', 'Overbooking prevented', '✅ Enforced'],
+        ],
+        note: '🔒 CONSISTENCY: DB transitions from one valid state to another. All constraints must hold before and after the transaction.'
+      });
+      return;
+    }
+
+    if (q.includes('ISOLATION') && q.includes('FOR UPDATE')) {
+      addSqlLog('-- T1: SELECT ... FOR UPDATE on A-01 (lock acquired)');
+      addSqlLog('-- T2: SELECT ... FOR UPDATE on A-01 (BLOCKED, waiting for T1)');
+      addSqlLog('-- T1: COMMIT → lock released → T2 proceeds');
+      setQueryResults({
+        columns: ['time', 'T1 (Customer A)', 'T2 (Customer B)', 'slot A-01 state'],
+        rows: [
+          ['t0', 'BEGIN', '—', 'available'],
+          ['t1', 'SELECT A-01 FOR UPDATE 🔒', '—', 'locked by T1'],
+          ['t2', 'UPDATE → occupied', 'BEGIN', 'occupied (uncommitted)'],
+          ['t3', '—', 'SELECT A-01 FOR UPDATE ⏳', 'T2 BLOCKED'],
+          ['t4', 'COMMIT ✅', '—', 'occupied (committed)'],
+          ['t5', '—', 'Lock acquired → sees occupied', 'T2 picks A-02 instead'],
+          ['t6', '—', 'UPDATE A-02 → COMMIT ✅', 'Both parked safely'],
+        ],
+        note: '🔀 ISOLATION: Concurrent transactions don\'t interfere. T2 waits until T1 finishes, preventing double-booking.'
+      });
+      return;
+    }
+
+    if (q.includes('DURABILITY') && q.includes('TRANSACTION_DURABILITY')) {
+      addSqlLog('-- WAL: Write-Ahead Log ensures durability');
+      setQueryResults({
+        columns: ['phase', 'action', 'WAL_state', 'disk_state'],
+        rows: [
+          ['1. Execute', 'INSERT transaction TX999', 'Written to WAL ✅', 'Not yet on disk'],
+          ['2. Commit', 'COMMIT', 'Commit record in WAL ✅', 'Not yet on disk'],
+          ['3. Acknowledge', 'Client receives "OK"', 'WAL flushed to disk ✅', 'Pending checkpoint'],
+          ['⚡ CRASH', 'Server crashes here!', 'WAL survives on disk', 'Data pages lost'],
+          ['4. Recovery', 'Server restarts', 'Replays WAL ✅', 'Data restored from WAL'],
+          ['5. Verified', 'SELECT * FROM transactions', '—', 'TX999 present ✅'],
+        ],
+        note: '💾 DURABILITY: Once COMMIT returns success, the data is guaranteed to survive crashes. Write-Ahead Logging (WAL) makes this possible.'
+      });
+      return;
+    }
+
+    if (q.includes('ROLLBACK') && !q.includes('SAVEPOINT') && q.includes('BEGIN')) {
+      addSqlLog('BEGIN TRANSACTION;');
+      addSqlLog('  → UPDATE parking_slots ... ✓');
+      addSqlLog('  → INSERT vehicle_logs ... ✗ CHECK constraint violation!');
+      addSqlLog('ROLLBACK; -- All changes undone');
+      setQueryResults({
+        columns: ['step', 'operation', 'status', 'data_state'],
+        rows: [
+          ['1', 'BEGIN TRANSACTION', '✅', 'Snapshot taken'],
+          ['2', 'UPDATE slots SET occupied WHERE A-02', '✅ (pending)', 'A-02 → occupied (uncommitted)'],
+          ['3', 'INSERT vehicle_logs (INVALID-PLATE)', '❌ ERROR', 'CHECK constraint: plate format invalid'],
+          ['4', 'ROLLBACK', '↩️ Undone', 'A-02 → available (restored)'],
+          ['—', 'Final state of A-02', '✅ available', 'As if nothing happened'],
+        ],
+        note: '↩️ ROLLBACK: On error, all changes within the transaction are undone. The database returns to its state before BEGIN.'
+      });
+      return;
+    }
+
+    if (q.includes('SAVEPOINT')) {
+      addSqlLog('BEGIN; UPDATE slot; SAVEPOINT sp1; INSERT (wrong); ROLLBACK TO sp1; INSERT (correct); COMMIT;');
+      setQueryResults({
+        columns: ['step', 'operation', 'status', 'savepoint_stack'],
+        rows: [
+          ['1', 'BEGIN TRANSACTION', '✅', '[]'],
+          ['2', 'UPDATE slots A-03 → occupied', '✅ (pending)', '[]'],
+          ['3', 'SAVEPOINT sp1', '📌 Created', '[sp1]'],
+          ['4', 'INSERT payment ₹100 (wrong amt)', '✅ (pending)', '[sp1]'],
+          ['5', 'ROLLBACK TO SAVEPOINT sp1', '↩️ Partial undo', '[sp1] — payment undone, slot update kept'],
+          ['6', 'INSERT payment ₹80 (correct)', '✅ (pending)', '[sp1]'],
+          ['7', 'COMMIT', '✅ All done', 'Slot occupied + correct payment saved'],
+        ],
+        note: '📌 SAVEPOINT: Allows partial rollback within a transaction. Only undo back to the savepoint, keeping earlier work.'
+      });
+      return;
+    }
+
+    // ===== CONCURRENCY CONTROL =====
+    if (q.includes('LOCK_COMPATIBILITY_MATRIX') || q.includes('LOCK IN SHARE MODE')) {
+      addSqlLog('-- Lock compatibility matrix for Shared (S) and Exclusive (X) locks');
+      setQueryResults({
+        columns: ['Lock Requested →', 'S-Lock Held', 'X-Lock Held', 'No Lock'],
+        rows: [
+          ['S-Lock (Read)', '✅ Compatible', '❌ Blocked', '✅ Granted'],
+          ['X-Lock (Write)', '❌ Blocked', '❌ Blocked', '✅ Granted'],
+          ['No Lock', '✅ —', '✅ —', '✅ —'],
+        ],
+        note: '🔐 S-Lock (Shared): Multiple readers allowed. X-Lock (Exclusive): Only one writer, blocks all others.'
+      });
+      return;
+    }
+
+    if (q.includes('LOCK_DEMO_EXCLUSIVE')) {
+      addSqlLog('-- X-Lock acquired on row A-01');
+      setQueryResults({
+        columns: ['time', 'T1 (Writer)', 'T2 (Reader)', 'T3 (Writer)', 'A-01 lock'],
+        rows: [
+          ['t0', 'BEGIN', '—', '—', 'None'],
+          ['t1', 'SELECT A-01 FOR UPDATE', '—', '—', '🔒 X-Lock (T1)'],
+          ['t2', 'UPDATE status=occupied', 'SELECT A-01 ⏳ BLOCKED', '—', '🔒 X-Lock (T1)'],
+          ['t3', '—', '⏳ waiting...', 'UPDATE A-01 ⏳ BLOCKED', '🔒 X-Lock (T1)'],
+          ['t4', 'COMMIT ✅', '—', '—', '🔓 Released'],
+          ['t5', '—', 'Reads: occupied ✅', 'Acquires X-Lock', '🔒 X-Lock (T3)'],
+        ],
+        note: '🔒 EXCLUSIVE LOCK: Blocks both reads and writes from other transactions until released by COMMIT/ROLLBACK.'
+      });
+      return;
+    }
+
+    if (q.includes('DEADLOCK_DEMO')) {
+      addSqlLog('-- ⚠️ DEADLOCK detected between T1 and T2!');
+      setQueryResults({
+        columns: ['time', 'T1', 'T2', 'locks_held'],
+        rows: [
+          ['t0', 'BEGIN', 'BEGIN', '—'],
+          ['t1', 'UPDATE A-01 🔒', '—', 'T1→A-01'],
+          ['t2', '—', 'UPDATE A-02 🔒', 'T1→A-01, T2→A-02'],
+          ['t3', 'UPDATE A-02 ⏳ BLOCKED', '—', 'T1 waits for T2'],
+          ['t4', '—', 'UPDATE A-01 ⏳ BLOCKED', 'T2 waits for T1'],
+          ['t5', '💀 DEADLOCK!', '💀 DEADLOCK!', 'Circular wait detected'],
+          ['t6', '❌ ROLLBACK (victim)', 'COMMIT ✅', 'T1 sacrificed, T2 proceeds'],
+          ['t7', 'Retries transaction', '—', 'Application handles retry'],
+        ],
+        note: '💀 DEADLOCK: Circular wait between transactions. DBMS detects it and rolls back one transaction (the "victim").'
+      });
+      return;
+    }
+
+    if (q.includes('TWO_PHASE_LOCKING')) {
+      addSqlLog('-- 2PL: Growing phase → Shrinking phase');
+      setQueryResults({
+        columns: ['phase', 'action', 'locks_held', 'rule'],
+        rows: [
+          ['GROWING ↑', 'Acquire X-Lock on parking_slots(A-01)', '{X:A-01}', 'Can acquire new locks'],
+          ['GROWING ↑', 'Acquire S-Lock on customers(C001)', '{X:A-01, S:C001}', 'Can acquire new locks'],
+          ['GROWING ↑', 'Acquire X-Lock on vehicle_logs', '{X:A-01, S:C001, X:v_logs}', 'Peak — all locks held'],
+          ['—', '═══ LOCK POINT ═══', '3 locks held', 'No more acquisitions allowed'],
+          ['SHRINKING ↓', 'UPDATE A-01, release X-Lock', '{S:C001, X:v_logs}', 'Can only release now'],
+          ['SHRINKING ↓', 'Read C001, release S-Lock', '{X:v_logs}', 'Cannot acquire new locks'],
+          ['SHRINKING ↓', 'INSERT log, COMMIT', '{}', 'All locks released'],
+        ],
+        note: '📐 2PL guarantees SERIALIZABILITY: Growing phase (acquire locks) → Lock Point → Shrinking phase (release locks). Never acquire after releasing.'
+      });
+      return;
+    }
+
+    if (q.includes('ISOLATION_LEVELS_DEMO') || q.includes('ISOLATION LEVEL')) {
+      addSqlLog('-- Comparing SQL isolation levels');
+      setQueryResults({
+        columns: ['isolation_level', 'dirty_read', 'non_repeatable_read', 'phantom_read', 'performance'],
+        rows: [
+          ['READ UNCOMMITTED', '✅ Possible', '✅ Possible', '✅ Possible', '⚡ Fastest'],
+          ['READ COMMITTED', '❌ Prevented', '✅ Possible', '✅ Possible', '🔄 Default (PostgreSQL)'],
+          ['REPEATABLE READ', '❌ Prevented', '❌ Prevented', '✅ Possible', '🔒 Slower'],
+          ['SERIALIZABLE', '❌ Prevented', '❌ Prevented', '❌ Prevented', '🐌 Slowest'],
+        ],
+        note: '📊 Higher isolation = fewer anomalies but worse performance. PostgreSQL defaults to READ COMMITTED. Use SERIALIZABLE for critical financial operations.'
+      });
+      return;
+    }
+
+    if (q.includes('LOST_UPDATE_DEMO')) {
+      addSqlLog('-- Lost update problem demonstration');
+      setQueryResults({
+        columns: ['time', 'T1 (Pay ₹200)', 'T2 (Pay ₹300)', 'balance', 'issue'],
+        rows: [
+          ['t0', '—', '—', '₹1000', 'Initial'],
+          ['t1', 'READ balance=1000', '—', '₹1000', ''],
+          ['t2', '—', 'READ balance=1000', '₹1000', 'Both read same value'],
+          ['t3', 'WRITE balance=1000-200=800', '—', '₹800', ''],
+          ['t4', '—', 'WRITE balance=1000-300=700', '₹700', '⚠️ T1\'s update LOST!'],
+          ['—', '═══ SOLUTION ═══', '', '', ''],
+          ['t1\'', 'SELECT balance FOR UPDATE 🔒', '—', '₹1000', 'X-Lock acquired'],
+          ['t2\'', '—', 'SELECT balance FOR UPDATE ⏳', '₹1000', 'T2 BLOCKED'],
+          ['t3\'', 'WRITE 800, COMMIT', '—', '₹800', 'T1 done'],
+          ['t4\'', '—', 'READ 800, WRITE 800-300=500', '₹500', '✅ Correct!'],
+        ],
+        note: '⚠️ LOST UPDATE: Without locking, concurrent writes overwrite each other. SELECT ... FOR UPDATE prevents this.'
+      });
+      return;
+    }
+
     // --- CURSOR simulation ---
     if (q.includes('CURSOR') || q.includes('FETCH ALL')) {
       const locMatch = query.match(/location_id\s*=\s*'([^']+)'/i);
