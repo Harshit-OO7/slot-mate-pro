@@ -891,9 +891,26 @@ export default function Admin() {
                   <span className="text-sm font-medium text-foreground">SQL Query Editor</span>
                 </div>
 
-                {/* Preset queries */}
+                {/* Preset category tabs */}
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  {PRESET_CATEGORIES.map(cat => (
+                    <button
+                      key={cat}
+                      onClick={() => setActivePresetCategory(cat)}
+                      className={`px-3 py-1.5 rounded-md text-[11px] font-medium transition-all border ${
+                        activePresetCategory === cat
+                          ? 'bg-primary/10 border-primary/30 text-primary'
+                          : 'border-border text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Preset queries for active category */}
                 <div className="flex flex-wrap gap-2 mb-4">
-                  {PRESET_QUERIES.map(pq => (
+                  {PRESET_QUERIES.filter(pq => pq.category === activePresetCategory).map(pq => (
                     <button
                       key={pq.label}
                       onClick={() => { setSqlInput(pq.query); executeQuery(pq.query); }}
