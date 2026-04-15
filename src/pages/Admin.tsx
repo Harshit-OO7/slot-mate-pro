@@ -981,6 +981,11 @@ export default function Admin() {
                       </tbody>
                     </table>
                   </div>
+                  {queryResults.note && (
+                    <div className="px-4 py-3 border-t border-border/50 bg-primary/5">
+                      <p className="text-xs font-mono text-primary leading-relaxed">{queryResults.note}</p>
+                    </div>
+                  )}
                 </motion.div>
               )}
 
